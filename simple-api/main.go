@@ -48,8 +48,6 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 2 * time.Second,
 	}
-	// solve this: http: superfluous response.WriteHeader call from main.main.func1
-	// https://stackoverflow.com/questions/20348992/http-superfluous-response-writeheader-call-from-main-main-func1
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server error: %v", err)
