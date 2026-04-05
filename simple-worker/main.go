@@ -20,8 +20,14 @@ func main() {
 	live.Store(true)
 	ready.Store(false)
 
-	rabbitURL := os.Getenv("RABBITMQ_URL")
-	queueName := os.Getenv("QUEUE_NAME")
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	rabbitURL := envOrDefault("RABBITMQ_URL", "amqp://lab:lab@127.0.0.1:5672/")
+	queueName := envOrDefault("QUEUE_NAME", "simple-worker")
+	exchangeName := envOrDefault("EXCHANGE_NAME", "lab.events")
+	bindingKey := envOrDefault("BINDING_KEY", "labs.worker")
+	consumerTag := envOrDefault("CONSUMER_TAG", "go-worker")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
@@ -51,21 +57,16 @@ func main() {
 		}
 	}()
 
-	conn, err := amqp.Dial(rabbitURL)
+	conn, ch, err := connectRabbit(ctx, rabbitURL, exchangeName, queueName, bindingKey)
 	if err != nil {
-		log.Fatalf("rabbit connect error: %v", err)
+		log.Fatalf("rabbit setup error: %v", err)
 	}
 	defer conn.Close()
-
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Fatalf("rabbit channel error: %v", err)
-	}
 	defer ch.Close()
 
 	msgs, err := ch.Consume(
 		queueName,
-		"go-worker",
+		consumerTag,
 		false, // autoAck
 		false, // exclusive
 		false, // noLocal
@@ -77,13 +78,13 @@ func main() {
 	}
 
 	ready.Store(true)
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	log.Printf("worker ready: queue=%s exchange=%s binding=%s", queueName, exchangeName, bindingKey)
 
 	go func() {
 		<-ctx.Done()
+		log.Println("shutdown signal received")
 		ready.Store(false)
+		_ = ch.Cancel(consumerTag, false)
 		time.Sleep(5 * time.Second)
 		live.Store(false)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -118,4 +119,71 @@ func handleMessage(body []byte) error {
 	log.Printf("processing: %s", string(body))
 	time.Sleep(500 * time.Millisecond)
 	return nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func connectRabbit(ctx context.Context, rabbitURL, exchangeName, queueName, bindingKey string) (*amqp.Connection, *amqp.Channel, error) {
+	for {
+		conn, err := amqp.Dial(rabbitURL)
+		if err == nil {
+			ch, channelErr := conn.Channel()
+			if channelErr != nil {
+				_ = conn.Close()
+				err = channelErr
+			} else {
+				if setupErr := setupTopology(ch, exchangeName, queueName, bindingKey); setupErr != nil {
+					_ = ch.Close()
+					_ = conn.Close()
+					err = setupErr
+				} else {
+					return conn, ch, nil
+				}
+			}
+		}
+
+		log.Printf("rabbit unavailable, retrying in 2s: %v", err)
+
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func setupTopology(ch *amqp.Channel, exchangeName, queueName, bindingKey string) error {
+	if err := ch.ExchangeDeclare(
+		exchangeName,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	if _, err := ch.QueueDeclare(
+		queueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+
+	if err := ch.QueueBind(queueName, bindingKey, exchangeName, false, nil); err != nil {
+		return err
+	}
+
+	return ch.Qos(1, 0, false)
 }

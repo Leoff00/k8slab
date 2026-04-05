@@ -12,16 +12,18 @@ spec:
       labels:
         app: simple-api
     spec:
+      # whats the ideal request and limit for this container?
+
       containers:
         - name: simple-api
           image: leoff00/simple-api:latest
           imagePullPolicy: Always
           resources:
             limits:
-              memory: "128Mi"
+              memory: "256Mi"
               cpu: "500m"
             requests:
-              memory: "64Mi"
+              memory: "128Mi"
               cpu: "250m"
           ports:
             - containerPort: 8081
