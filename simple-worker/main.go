@@ -23,7 +23,6 @@ func main() {
 	rabbitURL := os.Getenv("RABBITMQ_URL")
 	queueName := os.Getenv("QUEUE_NAME")
 
-	// servidor interno só para probes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
 		if !live.Load() {
@@ -41,17 +40,17 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              ":8080",
+		Addr:              ":8082",
 		Handler:           mux,
 		ReadHeaderTimeout: 2 * time.Second,
 	}
+
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http server error: %v", err)
 		}
 	}()
 
-	// bootstrap
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
 		log.Fatalf("rabbit connect error: %v", err)
@@ -84,15 +83,9 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-
-		// sai de ready antes de parar
 		ready.Store(false)
-
-		// pequena drenagem
-		time.Sleep(8 * time.Second)
-
+		time.Sleep(5 * time.Second)
 		live.Store(false)
-
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)

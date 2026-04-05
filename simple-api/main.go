@@ -21,6 +21,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request from kube-probe")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK!\n"))
 	})
@@ -30,6 +31,8 @@ func main() {
 			http.Error(w, "not live", http.StatusInternalServerError)
 			return
 		}
+		log.Println("live!")
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("live!\n"))
 
@@ -39,6 +42,7 @@ func main() {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
+		log.Println("ready!")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ready!\n"))
 	})
@@ -47,11 +51,6 @@ func main() {
 		Addr:              ":8081",
 		Handler:           mux,
 		ReadHeaderTimeout: 2 * time.Second,
-	}
-
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("http server error: %v", err)
-
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -65,5 +64,9 @@ func main() {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("http server error: %v", err)
+	}
 
 }

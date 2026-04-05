@@ -14,8 +14,8 @@ spec:
     spec:
       containers:
         - name: simple-api
-          image: leoff00/simple-api:1
-          imagePullPolicy: IfNotPresent
+          image: leoff00/simple-api:latest
+          imagePullPolicy: Always
           resources:
             limits:
               memory: "128Mi"
@@ -28,7 +28,7 @@ spec:
           readinessProbe:
             httpGet:
               port: 8081
-              path: /healthz
+              path: /
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
